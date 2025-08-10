@@ -1,9 +1,10 @@
 import os
-import openai
 import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
+from openai import OpenAI  # новый импорт
 
+# Загружаем токены из переменных окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -13,27 +14,31 @@ if TELEGRAM_TOKEN is None:
 if OPENAI_API_KEY is None:
     raise ValueError("OPENAI_API_KEY не установлен в переменных окружения")
 
-openai.api_key = OPENAI_API_KEY
+# Инициализируем клиента OpenAI с ключом
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher(bot)
 
+# Обработка текстовых сообщений
 @dp.message_handler(content_types=types.ContentType.TEXT)
 async def handle_text(message: types.Message):
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": message.text}],
             temperature=0.7
         )
-        answer = response.choices[0].message["content"]
+        answer = response.choices[0].message.content
         await message.reply(answer)
     except Exception as e:
         await message.reply(f"Ошибка: {e}")
 
+# Обработка голосовых сообщений
 @dp.message_handler(content_types=types.ContentType.VOICE)
 async def handle_voice(message: types.Message):
     try:
+        # Скачиваем файл
         file = await bot.get_file(message.voice.file_id)
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file.file_path}"
 
@@ -45,17 +50,22 @@ async def handle_voice(message: types.Message):
         with open(temp_path, "wb") as f:
             f.write(voice_bytes)
 
+        # Распознаем речь через Whisper
         with open(temp_path, "rb") as audio_file:
-            transcript = openai.Audio.transcribe("whisper-1", audio_file)
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
 
-        recognized_text = transcript["text"]
+        recognized_text = transcript.text
 
-        response = openai.ChatCompletion.create(
+        # Отправляем распознанный текст в GPT
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": recognized_text}],
             temperature=0.7
         )
-        answer = response.choices[0].message["content"]
+        answer = response.choices[0].message.content
 
         await message.reply(f"🗣 Вы сказали: {recognized_text}\n\n💬 Ответ: {answer}")
 
